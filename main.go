@@ -5,6 +5,7 @@ package goPushJet
 import (
 	"encoding/json"
 	"errors"
+	"github.com/dghubble/sling"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -12,6 +13,38 @@ import (
 
 type servResp struct {
 	Service Service `json:"service"`
+}
+
+type getServResp struct {
+	Service Service  `json:"service"`
+	Status  string   `json:"status"`
+	Error   errorMsg `json:"error"`
+}
+
+type UpdResp struct {
+	Service Service  `json:"service"`
+	Status  string   `json:"status"`
+	Error   errorMsg `json:"error"`
+}
+
+type UpdParams struct {
+	Name   string `url="name,omitempty"`
+	Secret string `url="secret`
+	Icon   string `url="icon,omitempty`
+}
+
+type DelParams struct {
+	Secret string `url="secret`
+}
+
+type DelResp struct {
+	Status string   `json:"status"`
+	Error  errorMsg `json:"error"`
+}
+
+type GetServParams struct {
+	Service string `url:"service,omitempty"`
+	Private string `url:"secret,omitempty"`
 }
 
 type Service struct {
@@ -22,7 +55,7 @@ type Service struct {
 	Secret  string `json:"secret"`
 }
 
-type msgResp struct {
+type RespStatus struct {
 	Status string   `json:"status"`
 	Error  errorMsg `json:"error"`
 }
@@ -35,6 +68,73 @@ type errorMsg struct {
 // GetQR - Get QR image
 func (serv *Service) GetQR() string {
 	return "https://chart.googleapis.com/chart?cht=qr&chl=" + serv.Public + "&choe=UTF-8&chs=200x200"
+}
+
+func serviceSlingBase() *sling.Sling {
+	return sling.New().Base("https://api.pushjet.io/")
+}
+
+func checkRespStatus(s RespStatus) error {
+	if s.Error.Message != "" {
+		return errors.New(s.Error.Message)
+	}
+
+	if s.Status != "ok" {
+		return errors.New("Did not return status OK")
+	}
+	return nil
+}
+
+func UpdateService(secret, newName, newIcon string) (Service, error) {
+	//Create the updateService Params
+	usp := &UpdParams{Secret: secret, Name: newName, Icon: newIcon}
+	uspResp := new(UpdResp)
+	_, err := serviceSlingBase().Patch("service").BodyForm(usp).ReceiveSuccess(uspResp)
+
+	if err != nil {
+		return Service{}, err
+	}
+
+	if err = checkRespStatus(RespStatus{
+		Status: uspResp.Status,
+		Error:  uspResp.Error}); err != nil {
+
+		return Service{}, err
+	}
+
+	return uspResp.Service, nil
+
+}
+
+func DeleteService(secret string) error {
+	dp := &DelParams{Secret: secret}
+	dResp := new(DelResp)
+	_, err := serviceSlingBase().Delete("service").BodyForm(dp).ReceiveSuccess(dResp)
+
+	if err != nil {
+		return err
+	}
+
+	return checkRespStatus(RespStatus{
+		Status: dResp.Status,
+		Error:  dResp.Error})
+}
+func GetServiceInfo(params GetServParams) (Service, error) {
+	gsr := new(getServResp)
+	path := "https://api.pushjet.io/service"
+	// Sling
+	_, err := sling.New().Get(path).QueryStruct(params).ReceiveSuccess(gsr)
+
+	if err != nil {
+		return Service{}, err
+	}
+
+	if err = checkRespStatus(RespStatus{
+		Status: gsr.Status,
+		Error:  gsr.Error}); err != nil {
+		return Service{}, err
+	}
+	return gsr.Service, nil
 }
 
 // CreateService - Create new service
@@ -70,7 +170,7 @@ func SendMessage(secret, message, title string, level int, link string) error {
 	}
 	defer resp.Body.Close()
 
-	msg := msgResp{}
+	msg := RespStatus{}
 	err = json.NewDecoder(resp.Body).Decode(&msg)
 	if err != nil {
 		return err
