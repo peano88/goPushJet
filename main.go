@@ -21,30 +21,29 @@ type getServResp struct {
 	Error   errorMsg `json:"error"`
 }
 
-type UpdResp struct {
-	Service Service  `json:"service"`
-	Status  string   `json:"status"`
-	Error   errorMsg `json:"error"`
+type getServParams struct {
+	Service string `url:"service,omitempty"`
+	Secret  string `url:"secret,omitempty"`
 }
 
-type UpdParams struct {
-	Name   string `url="name,omitempty"`
-	Secret string `url="secret`
-	Icon   string `url="icon,omitempty`
-}
-
-type DelParams struct {
-	Secret string `url="secret`
-}
-
-type DelResp struct {
+type updResp struct {
 	Status string   `json:"status"`
 	Error  errorMsg `json:"error"`
 }
 
-type GetServParams struct {
-	Service string `url:"service,omitempty"`
-	Private string `url:"secret,omitempty"`
+type updParams struct {
+	Name   string `url:"name,omitempty"`
+	Secret string `url:"secret"`
+	Icon   string `url:"icon,omitempty"`
+}
+
+type delParams struct {
+	Secret string `url:"secret"`
+}
+
+type delResp struct {
+	Status string   `json:"status"`
+	Error  errorMsg `json:"error"`
 }
 
 type Service struct {
@@ -55,7 +54,7 @@ type Service struct {
 	Secret  string `json:"secret"`
 }
 
-type RespStatus struct {
+type respStatus struct {
 	Status string   `json:"status"`
 	Error  errorMsg `json:"error"`
 }
@@ -70,66 +69,73 @@ func (serv *Service) GetQR() string {
 	return "https://chart.googleapis.com/chart?cht=qr&chl=" + serv.Public + "&choe=UTF-8&chs=200x200"
 }
 
+func (serv *Service) IsEmpty() bool {
+	return serv.Public == ""
+}
+
 func serviceSlingBase() *sling.Sling {
 	return sling.New().Base("https://api.pushjet.io/")
 }
 
-func checkRespStatus(s RespStatus) error {
+func checkRespStatus(s respStatus) error {
 	if s.Error.Message != "" {
 		return errors.New(s.Error.Message)
 	}
 
-	if s.Status != "ok" {
-		return errors.New("Did not return status OK")
+	if s.Status != "ok" && s.Status != "" {
+		return errors.New("Did not return status OK: " + s.Status)
 	}
 	return nil
 }
 
-func UpdateService(secret, newName, newIcon string) (Service, error) {
+func UpdateService(secret, newName, newIcon string) error {
 	//Create the updateService Params
-	usp := &UpdParams{Secret: secret, Name: newName, Icon: newIcon}
-	uspResp := new(UpdResp)
-	_, err := serviceSlingBase().Patch("service").BodyForm(usp).ReceiveSuccess(uspResp)
 
+	usp := updParams{Secret: secret, Name: newName, Icon: newIcon}
+	uspResp := new(updResp)
+	sbb := serviceSlingBase().New()
+	sb := sbb.Patch("service").BodyForm(&usp)
+	_, err := sb.ReceiveSuccess(uspResp)
 	if err != nil {
-		return Service{}, err
+		return err
 	}
 
-	if err = checkRespStatus(RespStatus{
+	if err = checkRespStatus(respStatus{
 		Status: uspResp.Status,
 		Error:  uspResp.Error}); err != nil {
 
-		return Service{}, err
+		return err
 	}
 
-	return uspResp.Service, nil
+	return nil
 
 }
 
 func DeleteService(secret string) error {
-	dp := &DelParams{Secret: secret}
-	dResp := new(DelResp)
+	dp := &delParams{Secret: secret}
+	dResp := new(delResp)
 	_, err := serviceSlingBase().Delete("service").BodyForm(dp).ReceiveSuccess(dResp)
 
 	if err != nil {
 		return err
 	}
 
-	return checkRespStatus(RespStatus{
+	return checkRespStatus(respStatus{
 		Status: dResp.Status,
 		Error:  dResp.Error})
 }
-func GetServiceInfo(params GetServParams) (Service, error) {
+func GetServiceInfo(service, secret string) (Service, error) {
+	gsi := &getServParams{Secret: secret, Service: service}
 	gsr := new(getServResp)
 	path := "https://api.pushjet.io/service"
 	// Sling
-	_, err := sling.New().Get(path).QueryStruct(params).ReceiveSuccess(gsr)
+	_, err := sling.New().Get(path).QueryStruct(gsi).ReceiveSuccess(gsr)
 
 	if err != nil {
 		return Service{}, err
 	}
 
-	if err = checkRespStatus(RespStatus{
+	if err = checkRespStatus(respStatus{
 		Status: gsr.Status,
 		Error:  gsr.Error}); err != nil {
 		return Service{}, err
@@ -170,7 +176,7 @@ func SendMessage(secret, message, title string, level int, link string) error {
 	}
 	defer resp.Body.Close()
 
-	msg := RespStatus{}
+	msg := respStatus{}
 	err = json.NewDecoder(resp.Body).Decode(&msg)
 	if err != nil {
 		return err
